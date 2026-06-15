@@ -1,0 +1,232 @@
+# Bubbletea v2 — local dev stack.
+#
+# Postgres and Authentik are NOT here — they live in the dlplab clusters
+# (see .env.example for the dev endpoints). Vault is bundled and runs in
+# production mode against a file backend; `vault-init` initializes it on
+# first boot and auto-unseals after restarts.
+#
+# TLS terminates at an EXISTING local Traefik (not part of this stack) that
+# watches the docker socket and joins the external `frontend` network. The
+# whole stack is served from one hostname (default
+# bubbletea.client1.dlplab.tech) with path routing:
+#   /api/*    -> api    (prefix stripped)
+#   /ingest/* -> ingest (prefix stripped)
+#   /*        -> web
+# Certificates come from Traefik's `route53` ACME resolver as a
+# *.client1.dlplab.tech wildcard. No service publishes a host port.
+
+name: bubbletea
+
+networks:
+  frontend:
+    external: true   # the network the local Traefik instance is attached to
+
+services:
+  vault:
+    image: hashicorp/vault:2.0.2
+    restart: unless-stopped
+    cap_add: ["IPC_LOCK"]
+    # The vault:2.0 image runs as a non-root user, so cap_add alone doesn't
+    # let the process mlock (no ambient caps) and the entrypoint skips setcap
+    # for non-root. An unlimited RLIMIT_MEMLOCK lets mlock succeed without
+    # the capability — keep disable_mlock = false in config.hcl.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    environment:
+      SKIP_SETCAP: "true"
+    volumes:
+      - /data/compose/bubbletea/vault/config-dev.hcl:/vault/config/config.hcl:ro
+      - vault_data:/vault/file
+    # No explicit -config flag: the image entrypoint appends
+    # -config=/vault/config when argv[0] is "server", which picks up the
+    # mounted config.hcl. Passing it again loads the file twice and the
+    # duplicate tcp listener fails with "address already in use".
+    command: ["server"]
+
+  vault-init:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-vault-init:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_INIT_KEY_PATH: /vault/init/unseal.key
+    volumes:
+      - vault_init:/vault/init
+    depends_on: [vault]
+
+  api:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-api:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      VAULT_ADDR: http://vault:8200
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-app-bubbletea-admin}
+      PUBLIC_URL: https://${BUBBLETEA_HOST:-bubbletea.svc.dlplab.tech}
+      SESSION_SECRET: ${SESSION_SECRET}
+      DEPLOYER_URL: http://deployer:8080
+      DEPLOYER_TOKEN: ${DEPLOYER_TOKEN}
+      AGENT_BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
+      # UniFi Network API (local controller) — enriches Network discovery with
+      # config-only networks (third-party-gateway / VLAN-only). Empty disables it.
+      UNIFI_API_URL: ${UNIFI_API_URL:-}
+      UNIFI_API_KEY: ${UNIFI_API_KEY:-}
+      UNIFI_TLS_INSECURE: ${UNIFI_TLS_INSECURE:-true}
+    volumes:
+      - api_config:/etc/bubbletea
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    networks: [default, frontend]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: frontend
+      traefik.http.routers.bubbletea-api.rule: Host(`${BUBBLETEA_HOST:-bubbletea.svc.dlplab.tech}`) && PathPrefix(`/api`)
+      traefik.http.routers.bubbletea-api.entrypoints: websecure
+      traefik.http.routers.bubbletea-api.tls.certresolver: route53
+      traefik.http.routers.bubbletea-api.middlewares: bubbletea-api-strip
+      traefik.http.middlewares.bubbletea-api-strip.stripprefix.prefixes: /api
+      traefik.http.services.bubbletea-api.loadbalancer.server.port: "8080"
+    depends_on: [vault-init]
+
+  # Terraform engine (bubbletea v1 retrofit). Internal-only: no traefik
+  # labels, reachable solely through the api's admin-gated /v1/deploy proxy.
+  # Talks to the PRODUCTION Vault (not the bundled one) for terraform
+  # AppRole creds, AWS keys, the git PAT, and per-cluster Proxmox tokens.
+  deployer:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-deployer:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      S3_BUCKET: ${DEPLOY_S3_BUCKET}
+      AWS_REGION: ${DEPLOY_AWS_REGION:-ap-southeast-2}
+      PROD_VAULT_ADDR: ${PROD_VAULT_ADDR}
+      PROD_VAULT_ROLE_ID: ${PROD_VAULT_ROLE_ID}
+      PROD_VAULT_SECRET_ID: ${PROD_VAULT_SECRET_ID}
+      VAULT_TF_ROLE_PATH: ${VAULT_TF_ROLE_PATH:-auth/approle/role/terraform}
+      VAULT_AWS_KV_PATH: ${VAULT_AWS_KV_PATH:-infra/data/aws}
+      VAULT_GIT_KV_PATH: ${VAULT_GIT_KV_PATH:-github/data/tokens/terraform}
+      VAULT_SSH_KV_PATH: ${VAULT_SSH_KV_PATH:-infra/data/ssh/ceph-monitor}
+      VAULT_CLOUDFLARE_KV_PATH: ${VAULT_CLOUDFLARE_KV_PATH:-secrets/data/cloudflare}
+      VAULT_PROXMOX_KV_MOUNT: ${VAULT_PROXMOX_KV_MOUNT:-proxmox_api_keys}
+      DEPLOYMENTS_GIT_URL: ${DEPLOYMENTS_GIT_URL}
+      TERRAFORM_GIT_URL: ${TERRAFORM_GIT_URL}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      INTERNAL_TOKEN: ${DEPLOYER_TOKEN}
+      PROXMOX_TLS_INSECURE: ${PROXMOX_TLS_INSECURE:-false}
+    volumes:
+      - deployer_apps:/terraform/apps
+      - deployer_repo:/terraform/repo
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+
+  scheduler:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-scheduler:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+    volumes:
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    depends_on: [api]
+
+  etl:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-etl:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      # Reads (agent list, ETL cursor) route to RO; device + cursor writes to RW.
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-30}
+    volumes:
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    depends_on: [api]
+
+  ingest:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-ingest:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      DB_URL_RW: ${DB_URL_RW}
+    volumes:
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    networks: [default, frontend]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: frontend
+      traefik.http.routers.bubbletea-ingest.rule: Host(`${BUBBLETEA_HOST:-bubbletea.svc.dlplab.tech}`) && PathPrefix(`/ingest`)
+      traefik.http.routers.bubbletea-ingest.entrypoints: websecure
+      traefik.http.routers.bubbletea-ingest.tls.certresolver: route53
+      traefik.http.routers.bubbletea-ingest.middlewares: bubbletea-ingest-strip
+      traefik.http.middlewares.bubbletea-ingest-strip.stripprefix.prefixes: /ingest
+      traefik.http.services.bubbletea-ingest.loadbalancer.server.port: "8080"
+    depends_on: [api]
+
+  agent-ssh:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-ssh:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      API_URL: http://api:8080
+      BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
+    depends_on: [api]
+
+  agent-snmp:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-snmp:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      # gRPC listener the control plane dials (SnmpAgent service). The
+      # default advertise address (agent-snmp:9090) resolves on the compose
+      # network; an agent on a remote host sets AGENT_ADVERTISE_ADDR.
+      GRPC_PORT: "9090"
+      API_URL: http://api:8080
+      BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
+      # Packet-level SNMP trace (engine discovery + USM handshake) to the
+      # agent log. Verbose — keep false except when diagnosing v3 issues.
+      SNMP_DEBUG: ${SNMP_DEBUG:-false}
+      # Where scheduled-discovery results are staged until the etl pulls them.
+      # Backed by a tmpfs (below) so the distroless nonroot user can write and
+      # nothing persists across restarts (principle 7).
+      STAGING_DIR: /staging
+    tmpfs:
+      - /staging:mode=1777
+    depends_on: [api]
+
+  agent-api:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-api:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      API_URL: http://api:8080
+      BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
+    depends_on: [api]
+
+  web:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-web:${IMAGE_TAG:-latest}
+    networks: [default, frontend]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: frontend
+      # Catch-all for the host; the /api and /ingest routers win on rule
+      # length, so this only sees SPA traffic.
+      traefik.http.routers.bubbletea-web.rule: Host(`${BUBBLETEA_HOST:-bubbletea.svc.dlplab.tech}`)
+      traefik.http.routers.bubbletea-web.entrypoints: websecure
+      traefik.http.routers.bubbletea-web.tls.certresolver: route53
+      # One wildcard cert covers every name under client1.dlplab.tech;
+      # declaring it here (once) is what makes ACME request the wildcard.
+      traefik.http.routers.bubbletea-web.tls.domains[0].main: "*.client1.dlplab.tech"
+      traefik.http.services.bubbletea-web.loadbalancer.server.port: "80"
+      # Plain-HTTP hits get a permanent redirect to https.
+      traefik.http.routers.bubbletea-web-http.rule: Host(`${BUBBLETEA_HOST:-bubbletea.svc.dlplab.tech}`)
+      traefik.http.routers.bubbletea-web-http.entrypoints: web
+      traefik.http.routers.bubbletea-web-http.middlewares: bubbletea-https-redirect
+      traefik.http.middlewares.bubbletea-https-redirect.redirectscheme.scheme: https
+      traefik.http.middlewares.bubbletea-https-redirect.redirectscheme.permanent: "true"
+    depends_on: [api]
+
+volumes:
+  vault_data:     # vault file storage (encrypted blobs)
+  vault_init:     # unseal key only, mode 0600 — bubbletea never stores the root token
+  api_config:     # api-server-owned config incl. /etc/bubbletea/vault-approle.json (mode 0600)
+  deployer_apps:  # deployments git repo checkout (tfvars + launcher.state per deployment)
+  deployer_repo:  # terraform template/modules git repo checkout
