@@ -37,7 +37,7 @@ services:
     environment:
       SKIP_SETCAP: "true"
     volumes:
-      - /data/compose/vault/config-dev.hcl:/vault/config/config.hcl:ro
+      - /data/compose/bubbletea/vault/config-dev.hcl:/vault/config/config.hcl:ro
       - vault_data:/vault/file
     # No explicit -config flag: the image entrypoint appends
     # -config=/vault/config when argv[0] is "server", which picks up the
@@ -46,6 +46,7 @@ services:
     command: ["server"]
 
   vault-init:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-vault-init:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/vault-init/Dockerfile
@@ -58,6 +59,7 @@ services:
     depends_on: [vault]
 
   api:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-api:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/api/Dockerfile
@@ -87,7 +89,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: frontend
-      traefik.http.routers.bubbletea-api.rule: Host(`${BUBBLETEA_HOST:-bubbletea-dev.svc.dlplab.tech}`) && PathPrefix(`/api`)
+      traefik.http.routers.bubbletea-api.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`) && PathPrefix(`/api`)
       traefik.http.routers.bubbletea-api.entrypoints: websecure
       traefik.http.routers.bubbletea-api.tls.certresolver: route53
       traefik.http.routers.bubbletea-api.middlewares: bubbletea-api-strip
@@ -100,6 +102,7 @@ services:
   # Talks to the PRODUCTION Vault (not the bundled one) for terraform
   # AppRole creds, AWS keys, the git PAT, and per-cluster Proxmox tokens.
   deployer:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-deployer:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/deployer/Dockerfile
@@ -130,6 +133,7 @@ services:
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
 
   scheduler:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-scheduler:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/scheduler/Dockerfile
@@ -142,6 +146,7 @@ services:
     depends_on: [api]
 
   etl:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-etl:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/etl/Dockerfile
@@ -156,6 +161,7 @@ services:
     depends_on: [api]
 
   ingest:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-ingest:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/ingest/Dockerfile
@@ -168,7 +174,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: frontend
-      traefik.http.routers.bubbletea-ingest.rule: Host(`${BUBBLETEA_HOST:-bubbletea-dev.svc.dlplab.tech}`) && PathPrefix(`/ingest`)
+      traefik.http.routers.bubbletea-ingest.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`) && PathPrefix(`/ingest`)
       traefik.http.routers.bubbletea-ingest.entrypoints: websecure
       traefik.http.routers.bubbletea-ingest.tls.certresolver: route53
       traefik.http.routers.bubbletea-ingest.middlewares: bubbletea-ingest-strip
@@ -177,6 +183,7 @@ services:
     depends_on: [api]
 
   agent-ssh:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-ssh:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/agent-ssh/Dockerfile
@@ -187,6 +194,7 @@ services:
     depends_on: [api]
 
   agent-snmp:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-snmp:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/agent-snmp/Dockerfile
@@ -210,6 +218,7 @@ services:
     depends_on: [api]
 
   agent-api:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-api:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/agent-api/Dockerfile
@@ -220,6 +229,7 @@ services:
     depends_on: [api]
 
   web:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-web:${IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: services/web/Dockerfile
@@ -229,7 +239,7 @@ services:
       traefik.docker.network: frontend
       # Catch-all for the host; the /api and /ingest routers win on rule
       # length, so this only sees SPA traffic.
-      traefik.http.routers.bubbletea-web.rule: Host(`${BUBBLETEA_HOST:-bubbletea-dev.svc.dlplab.tech}`)
+      traefik.http.routers.bubbletea-web.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`)
       traefik.http.routers.bubbletea-web.entrypoints: websecure
       traefik.http.routers.bubbletea-web.tls.certresolver: route53
       # One wildcard cert covers every name under client1.dlplab.tech;
@@ -237,7 +247,7 @@ services:
       traefik.http.routers.bubbletea-web.tls.domains[0].main: "*.client1.dlplab.tech"
       traefik.http.services.bubbletea-web.loadbalancer.server.port: "80"
       # Plain-HTTP hits get a permanent redirect to https.
-      traefik.http.routers.bubbletea-web-http.rule: Host(`${BUBBLETEA_HOST:-bubbletea-dev.svc.dlplab.tech}`)
+      traefik.http.routers.bubbletea-web-http.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`)
       traefik.http.routers.bubbletea-web-http.entrypoints: web
       traefik.http.routers.bubbletea-web-http.middlewares: bubbletea-https-redirect
       traefik.http.middlewares.bubbletea-https-redirect.redirectscheme.scheme: https
