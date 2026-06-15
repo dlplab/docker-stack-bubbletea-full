@@ -47,9 +47,6 @@ services:
 
   vault-init:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-vault-init:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/vault-init/Dockerfile
     restart: unless-stopped
     environment:
       VAULT_ADDR: http://vault:8200
@@ -60,9 +57,6 @@ services:
 
   api:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-api:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/api/Dockerfile
     environment:
       PORT: "8080"
       DB_URL_RO: ${DB_URL_RO}
@@ -103,9 +97,6 @@ services:
   # AppRole creds, AWS keys, the git PAT, and per-cluster Proxmox tokens.
   deployer:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-deployer:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/deployer/Dockerfile
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -134,9 +125,6 @@ services:
 
   scheduler:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-scheduler:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/scheduler/Dockerfile
     environment:
       PORT: "8080"
       DB_URL_RO: ${DB_URL_RO}
@@ -147,9 +135,6 @@ services:
 
   etl:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-etl:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/etl/Dockerfile
     environment:
       PORT: "8080"
       # Reads (agent list, ETL cursor) route to RO; device + cursor writes to RW.
@@ -162,9 +147,6 @@ services:
 
   ingest:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-ingest:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/ingest/Dockerfile
     environment:
       PORT: "8080"
       DB_URL_RW: ${DB_URL_RW}
@@ -184,9 +166,6 @@ services:
 
   agent-ssh:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-ssh:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/agent-ssh/Dockerfile
     environment:
       PORT: "8080"
       API_URL: http://api:8080
@@ -195,9 +174,6 @@ services:
 
   agent-snmp:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-snmp:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/agent-snmp/Dockerfile
     environment:
       PORT: "8080"
       # gRPC listener the control plane dials (SnmpAgent service). The
@@ -219,9 +195,6 @@ services:
 
   agent-api:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-api:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/agent-api/Dockerfile
     environment:
       PORT: "8080"
       API_URL: http://api:8080
@@ -230,9 +203,6 @@ services:
 
   web:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-web:${IMAGE_TAG:-latest}
-    build:
-      context: ../..
-      dockerfile: services/web/Dockerfile
     networks: [default, frontend]
     labels:
       traefik.enable: "true"
