@@ -145,6 +145,25 @@ services:
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
     depends_on: [api]
 
+  # Unix discovery orchestrator: selects due hosts from net_ip, resolves the
+  # shared SSH key from the bundled Vault (reads the api's AppRole file via the
+  # shared api_config volume), drives agent-ssh's Collect, and writes linux_host.
+  orchestrator:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-orchestrator:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      VAULT_ADDR: http://vault:8200
+      VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
+      # Credential name for the shared Unix SSH key (Settings → Discovery).
+      UNIX_SSH_CREDENTIAL: ${UNIX_SSH_CREDENTIAL:-unix}
+    volumes:
+      # Read-only share of the api's bundled-Vault AppRole creds.
+      - api_config:/etc/bubbletea:ro
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    depends_on: [api]
+
   ingest:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-ingest:${IMAGE_TAG:-latest}
     environment:
@@ -168,6 +187,10 @@ services:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-agent-ssh:${IMAGE_TAG:-latest}
     environment:
       PORT: "8080"
+      # gRPC listener the orchestrator dials (SshAgent.Collect). The default
+      # advertise address (agent-ssh:9090) resolves on the compose network; an
+      # agent on a remote host sets AGENT_ADVERTISE_ADDR.
+      GRPC_PORT: "9090"
       API_URL: http://api:8080
       BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
     depends_on: [api]
