@@ -10,7 +10,8 @@
 # whole stack is served from one hostname (default
 # bubbletea.client1.dlplab.tech) with path routing:
 #   /api/*    -> api    (prefix stripped)
-#   /ingest/* -> ingest (prefix stripped)
+#   /ingest/*    -> ingest    (prefix stripped)
+#   /assistant/* -> assistant (prefix stripped)
 #   /*        -> web
 # Certificates come from Traefik's `route53` ACME resolver as a
 # *.client1.dlplab.tech wildcard. No service publishes a host port.
@@ -86,7 +87,7 @@ services:
       traefik.http.routers.bubbletea-api.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`) && PathPrefix(`/api`)
       traefik.http.routers.bubbletea-api.entrypoints: websecure
       traefik.http.routers.bubbletea-api.tls.certresolver: route53
-      traefik.http.routers.bubbletea-api.middlewares: bubbletea-api-strip
+      traefik.http.routers.bubbletea-api.middlewares: bubbletea-api-strip,bubbletea-hsts
       traefik.http.middlewares.bubbletea-api-strip.stripprefix.prefixes: /api
       traefik.http.services.bubbletea-api.loadbalancer.server.port: "8080"
     depends_on: [vault-init]
@@ -145,6 +146,26 @@ services:
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
     depends_on: [api]
 
+  # Unix discovery orchestrator: selects due hosts from net_ip, resolves the
+  # shared SSH key from the bundled Vault (reads the api's AppRole file via the
+  # shared api_config volume), drives agent-ssh's Collect, and writes linux_host.
+  orchestrator:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-orchestrator:${IMAGE_TAG:-latest}
+    environment:
+      PORT: "8080"
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      VAULT_ADDR: http://vault:8200
+      VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
+      # Credential name for the shared Unix SSH key (Settings → Discovery).
+      UNIX_SSH_CREDENTIAL: ${UNIX_SSH_CREDENTIAL:-unix}
+    volumes:
+      # Read-only share of the api's bundled-Vault AppRole creds.
+      - api_config:/etc/bubbletea:ro
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    depends_on: [api]
+
+
   ingest:
     image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-ingest:${IMAGE_TAG:-latest}
     environment:
@@ -159,9 +180,72 @@ services:
       traefik.http.routers.bubbletea-ingest.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`) && PathPrefix(`/ingest`)
       traefik.http.routers.bubbletea-ingest.entrypoints: websecure
       traefik.http.routers.bubbletea-ingest.tls.certresolver: route53
-      traefik.http.routers.bubbletea-ingest.middlewares: bubbletea-ingest-strip
+      traefik.http.routers.bubbletea-ingest.middlewares: bubbletea-ingest-strip,bubbletea-hsts
       traefik.http.middlewares.bubbletea-ingest-strip.stripprefix.prefixes: /ingest
       traefik.http.services.bubbletea-ingest.loadbalancer.server.port: "8080"
+    depends_on: [api]
+
+  # AI assistant (read-only, phase 1). Agentic loop against a local Ollama;
+  # tools are the api's read endpoints called with the operator's own session
+  # cookie (no privileged backdoor). Streams SSE — no global write timeout.
+  assistant:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-assistant:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      PUBLIC_URL: https://${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}
+      SESSION_SECRET: ${SESSION_SECRET}   # MUST match the api's
+      API_URL: http://api:8080
+      DB_URL_RW: ${DB_URL_RW}             # conversation history + tool-call audit (empty = disabled)
+      OLLAMA_URL: ${OLLAMA_URL:-https://ollama.svc.dlplab.tech}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:12b}
+    volumes:
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
+    networks: [default, frontend]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: frontend
+      traefik.http.routers.bubbletea-assistant.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`) && PathPrefix(`/assistant`)
+      traefik.http.routers.bubbletea-assistant.entrypoints: websecure
+      traefik.http.routers.bubbletea-assistant.tls.certresolver: route53
+      traefik.http.routers.bubbletea-assistant.middlewares: bubbletea-assistant-strip,bubbletea-hsts
+      traefik.http.middlewares.bubbletea-assistant-strip.stripprefix.prefixes: /assistant
+      traefik.http.services.bubbletea-assistant.loadbalancer.server.port: "8080"
+    depends_on: [api]
+
+  # Backup & restore: scheduled pg_dump + bundled-Vault export -> tar+zstd ->
+  # age-encrypt -> S3, with retention. Internal-only: no traefik labels,
+  # reached solely through the api's admin-gated /v1/backup proxy (same
+  # X-Internal-Token contract as the deployer). The same image is the
+  # break-glass CLI — see docs/backup-restore.md in the app repo.
+  backup:
+    image: ghcr.io/${IMAGE_OWNER:-dlplab}/bubbletea-backup:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      INTERNAL_TOKEN: ${BACKUP_TOKEN}
+      DB_URL_RO: ${DB_URL_RO}
+      DB_URL_RW: ${DB_URL_RW}
+      VAULT_ADDR: http://vault:8200
+      VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
+      VAULT_INIT_KEY_PATH: /vault/init/unseal.key
+      BUBBLETEA_ENV: ${BUBBLETEA_ENV:-dev}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-bubbletea}
+      AWS_REGION: ${BACKUP_AWS_REGION:-ap-southeast-2}
+      AWS_ACCESS_KEY_ID: ${BACKUP_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_AWS_SECRET_ACCESS_KEY:-}
+      # age X25519 keypair (age-keygen). Recipient (public) encrypts; identity
+      # (private) is restore-only. Keep BOTH off-host too — losing the identity
+      # makes every backup unreadable. Use a DIFFERENT keypair per environment.
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_AGE_IDENTITY: ${BACKUP_AGE_IDENTITY:-}
+    volumes:
+      # Read-only: the api's bundled-Vault AppRole + vault-init's unseal key,
+      # both captured inside the encrypted bundle for bare-host recovery.
+      - api_config:/etc/bubbletea:ro
+      - vault_init:/vault/init:ro
+      - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
     depends_on: [api]
 
   agent-ssh:
@@ -216,6 +300,11 @@ services:
       # declaring it here (once) is what makes ACME request the wildcard.
       traefik.http.routers.bubbletea-web.tls.domains[0].main: "*.client1.dlplab.tech"
       traefik.http.services.bubbletea-web.loadbalancer.server.port: "80"
+      # HSTS is edge-owned: one shared headers middleware, attached to every
+      # HTTPS router of the stack (api/ingest/assistant reference it too).
+      traefik.http.routers.bubbletea-web.middlewares: bubbletea-hsts
+      traefik.http.middlewares.bubbletea-hsts.headers.stsSeconds: "31536000"
+      traefik.http.middlewares.bubbletea-hsts.headers.stsIncludeSubdomains: "false"
       # Plain-HTTP hits get a permanent redirect to https.
       traefik.http.routers.bubbletea-web-http.rule: Host(`${BUBBLETEA_HOST:-bubbletea.client1.dlplab.tech}`)
       traefik.http.routers.bubbletea-web-http.entrypoints: web
