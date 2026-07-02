@@ -71,6 +71,8 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       DEPLOYER_URL: http://deployer:8080
       DEPLOYER_TOKEN: ${DEPLOYER_TOKEN}
+      BACKUP_URL: http://backup:8080
+      BACKUP_TOKEN: ${BACKUP_TOKEN}
       AGENT_BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN}
       # UniFi Network API (local controller) — enriches Network discovery with
       # config-only networks (third-party-gateway / VLAN-only). Empty disables it.
