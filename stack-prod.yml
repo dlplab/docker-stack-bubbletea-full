@@ -161,6 +161,9 @@ services:
       VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
       # Credential name for the shared Unix SSH key (Settings → Discovery).
       UNIX_SSH_CREDENTIAL: ${UNIX_SSH_CREDENTIAL:-unix}
+      # Shared secret for the ingest→orchestrator on-demand discovery trigger
+      # (POST /internal/pg-discovery). ingest maps the same ORCHESTRATOR_TOKEN.
+      INTERNAL_TOKEN: ${ORCHESTRATOR_TOKEN}
     volumes:
       # Read-only share of the api's bundled-Vault AppRole creds.
       - api_config:/etc/bubbletea:ro
@@ -172,6 +175,11 @@ services:
     environment:
       PORT: "8080"
       DB_URL_RW: ${DB_URL_RW}
+      # Patroni event-triggered discovery: DB hosts' callbacks POST to
+      # /ingest/patroni with this bearer; ingest forwards to the orchestrator.
+      PATRONI_INGEST_TOKEN: ${PATRONI_INGEST_TOKEN}
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      INTERNAL_TOKEN: ${ORCHESTRATOR_TOKEN}
     volumes:
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
     networks: [default, frontend]
