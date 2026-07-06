@@ -62,6 +62,10 @@ services:
       PORT: "8080"
       DB_URL_RO: ${DB_URL_RO}
       DB_URL_RW: ${DB_URL_RW}
+      # TimescaleDB metrics database (host monitoring). Empty disables the
+      # monitoring endpoints + the metrics migration stream.
+      METRICS_DB_URL_RO: ${METRICS_DB_URL_RO:-}
+      METRICS_DB_URL_RW: ${METRICS_DB_URL_RW:-}
       VAULT_ADDR: http://vault:8200
       OIDC_ISSUER: ${OIDC_ISSUER}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
@@ -157,6 +161,9 @@ services:
       PORT: "8080"
       DB_URL_RO: ${DB_URL_RO}
       DB_URL_RW: ${DB_URL_RW}
+      # Host metrics land in the TimescaleDB metrics database; the
+      # orchestrator only writes (rw). Empty disables the metrics loop.
+      METRICS_DB_URL_RW: ${METRICS_DB_URL_RW:-}
       VAULT_ADDR: http://vault:8200
       VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
       # Credential name for the shared Unix SSH key (Settings → Discovery).
