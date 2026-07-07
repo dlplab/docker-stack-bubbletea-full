@@ -125,9 +125,19 @@ services:
       GIT_BRANCH: ${GIT_BRANCH:-main}
       INTERNAL_TOKEN: ${DEPLOYER_TOKEN}
       PROXMOX_TLS_INSECURE: ${PROXMOX_TLS_INSECURE:-false}
+      # Workspace -> Images (packer template builds). Prod is the image
+      # factory: it publishes 8802 for the ubuntu autoinstall HTTP server
+      # (dev shares this host, so only one instance may bind the port).
+      PACKER_GIT_URL: ${PACKER_GIT_URL:-}
+      PACKER_GIT_BRANCH: ${PACKER_GIT_BRANCH:-main}
+      VAULT_OSADM_SSH_KV_PATH: ${VAULT_OSADM_SSH_KV_PATH:-infra/data/ssh/osadm}
+      PACKER_HTTP_IP: ${PACKER_HTTP_IP:-}
+    ports:
+      - "8802:8802"
     volumes:
       - deployer_apps:/terraform/apps
       - deployer_repo:/terraform/repo
+      - packer_repo:/packer
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
 
   scheduler:
@@ -339,3 +349,4 @@ volumes:
   api_config:     # api-server-owned config incl. /etc/bubbletea/vault-approle.json (mode 0600)
   deployer_apps:  # deployments git repo checkout (tfvars + launcher.state per deployment)
   deployer_repo:  # terraform template/modules git repo checkout
+  packer_repo:    # bubbletea-packer git repo checkout (image builds)
