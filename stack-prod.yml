@@ -130,6 +130,9 @@ services:
       # (dev shares this host, so only one instance may bind the port).
       PACKER_GIT_URL: ${PACKER_GIT_URL:-}
       PACKER_GIT_BRANCH: ${PACKER_GIT_BRANCH:-main}
+      # Documentation git sync (docs repo gateway; unset = disabled)
+      DOCS_GIT_URL: ${DOCS_GIT_URL:-}
+      DOCS_GIT_BRANCH: ${DOCS_GIT_BRANCH:-main}
       VAULT_OSADM_SSH_KV_PATH: ${VAULT_OSADM_SSH_KV_PATH:-infra/data/ssh/osadm}
       PACKER_HTTP_IP: ${PACKER_HTTP_IP:-}
     ports:
@@ -138,6 +141,7 @@ services:
       - deployer_apps:/terraform/apps
       - deployer_repo:/terraform/repo
       - packer_repo:/packer
+      - docs_repo:/docsrepo
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
 
   scheduler:
@@ -350,3 +354,4 @@ volumes:
   deployer_apps:  # deployments git repo checkout (tfvars + launcher.state per deployment)
   deployer_repo:  # terraform template/modules git repo checkout
   packer_repo:    # bubbletea-packer git repo checkout (image builds)
+  docs_repo:      # app-bubbletea-documentation checkout (docs git sync)
