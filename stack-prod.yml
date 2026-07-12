@@ -135,6 +135,21 @@ services:
       DOCS_GIT_BRANCH: ${DOCS_GIT_BRANCH:-main}
       VAULT_OSADM_SSH_KV_PATH: ${VAULT_OSADM_SSH_KV_PATH:-infra/data/ssh/osadm}
       PACKER_HTTP_IP: ${PACKER_HTTP_IP:-}
+      # Windows post-deploy hook (requirements/windows-server.md §1d): domain
+      # join + ops verification + bootstrap-Administrator retirement. The join
+      # KV path has NO in-code default — leave VAULT_WINDOWS_JOIN_KV_PATH unset
+      # and the hook skips (VMs stay workgroup with the bootstrap Administrator
+      # active). Set it (the env file supplies the value) to enable join.
+      VAULT_WINDOWS_JOIN_KV_PATH: ${VAULT_WINDOWS_JOIN_KV_PATH:-}
+      VAULT_WINDOWS_OPS_KV_PATH: ${VAULT_WINDOWS_OPS_KV_PATH:-infra/data/windows/bubbletea}
+      WINDOWS_OPS_ACCOUNT: ${WINDOWS_OPS_ACCOUNT:-svc_bubbletea_ops}
+      # PRODUCTION: fail closed. WINDOWS_REQUIRE_JOIN=true refuses to leave a VM
+      # in a workgroup with the shared bootstrap Administrator active; pair with
+      # WINDOWS_HOOK_FAILURE_POLICY=fail. Set both in the prod env file once the
+      # join secret exists at VAULT_WINDOWS_JOIN_KV_PATH.
+      WINDOWS_HOOK_FAILURE_POLICY: ${WINDOWS_HOOK_FAILURE_POLICY:-warn}
+      WINDOWS_REQUIRE_JOIN: ${WINDOWS_REQUIRE_JOIN:-false}
+      WINDOWS_HOOK_TIMEOUT: ${WINDOWS_HOOK_TIMEOUT:-2700}
     ports:
       - "8802:8802"
     volumes:
@@ -182,6 +197,12 @@ services:
       VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
       # Credential name for the shared Unix SSH key (Settings → Discovery).
       UNIX_SSH_CREDENTIAL: ${UNIX_SSH_CREDENTIAL:-unix}
+      # Patching ops key + Windows discovery credential. Both default in-code
+      # (unix-ops / windows-ops), so they already work unset — wired here for
+      # explicitness and override. Windows discovery idles cleanly if its
+      # credential doesn't resolve.
+      UNIX_OPS_CREDENTIAL: ${UNIX_OPS_CREDENTIAL:-unix-ops}
+      WINDOWS_DISCOVERY_CREDENTIAL: ${WINDOWS_DISCOVERY_CREDENTIAL:-windows-ops}
       # Shared secret for the ingest→orchestrator on-demand discovery trigger
       # (POST /internal/pg-discovery). ingest maps the same ORCHESTRATOR_TOKEN.
       INTERNAL_TOKEN: ${ORCHESTRATOR_TOKEN}

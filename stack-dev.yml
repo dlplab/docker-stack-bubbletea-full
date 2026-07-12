@@ -134,6 +134,16 @@ services:
       DOCS_GIT_URL: ${DOCS_GIT_URL:-}
       DOCS_GIT_BRANCH: ${DOCS_GIT_BRANCH:-main}
       VAULT_OSADM_SSH_KV_PATH: ${VAULT_OSADM_SSH_KV_PATH:-infra/data/ssh/osadm}
+      # Windows post-deploy hook (requirements/windows-server.md §1d): domain
+      # join + ops verification + bootstrap-Administrator retirement. The join
+      # KV path has NO in-code default — unset = hook skips (VMs stay workgroup).
+      # dev stays skip-cleanly (WINDOWS_REQUIRE_JOIN=false) for bring-up.
+      VAULT_WINDOWS_JOIN_KV_PATH: ${VAULT_WINDOWS_JOIN_KV_PATH:-}
+      VAULT_WINDOWS_OPS_KV_PATH: ${VAULT_WINDOWS_OPS_KV_PATH:-infra/data/windows/bubbletea}
+      WINDOWS_OPS_ACCOUNT: ${WINDOWS_OPS_ACCOUNT:-svc_bubbletea_ops}
+      WINDOWS_HOOK_FAILURE_POLICY: ${WINDOWS_HOOK_FAILURE_POLICY:-warn}
+      WINDOWS_REQUIRE_JOIN: ${WINDOWS_REQUIRE_JOIN:-false}
+      WINDOWS_HOOK_TIMEOUT: ${WINDOWS_HOOK_TIMEOUT:-2700}
     volumes:
       - deployer_apps:/terraform/apps
       - deployer_repo:/terraform/repo
@@ -179,6 +189,10 @@ services:
       VAULT_APPROLE_PATH: /etc/bubbletea/vault-approle.json
       # Credential name for the shared Unix SSH key (Settings → Discovery).
       UNIX_SSH_CREDENTIAL: ${UNIX_SSH_CREDENTIAL:-unix}
+      # Patching ops key + Windows discovery credential. Both default in-code
+      # (unix-ops / windows-ops); wired here for explicitness and override.
+      UNIX_OPS_CREDENTIAL: ${UNIX_OPS_CREDENTIAL:-unix-ops}
+      WINDOWS_DISCOVERY_CREDENTIAL: ${WINDOWS_DISCOVERY_CREDENTIAL:-windows-ops}
       # Shared secret for the ingest→orchestrator on-demand discovery trigger
       # (POST /internal/pg-discovery). ingest maps the same ORCHESTRATOR_TOKEN.
       INTERNAL_TOKEN: ${ORCHESTRATOR_TOKEN}
