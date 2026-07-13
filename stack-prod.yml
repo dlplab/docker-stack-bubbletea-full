@@ -133,6 +133,13 @@ services:
       # Documentation git sync (docs repo gateway; unset = disabled)
       DOCS_GIT_URL: ${DOCS_GIT_URL:-}
       DOCS_GIT_BRANCH: ${DOCS_GIT_BRANCH:-main}
+      # Workspace -> Applications: ansible playbooks over deployments
+      # (requirements/ansible-deployment.md). Unset = capability disabled.
+      ANSIBLE_GIT_URL: ${ANSIBLE_GIT_URL:-}
+      ANSIBLE_GIT_BRANCH: ${ANSIBLE_GIT_BRANCH:-main}
+      # Post-deploy hook callback target (phase 3): the api resolves the
+      # bound profile's Vault secrets and starts the run.
+      API_URL: ${DEPLOYER_API_URL:-http://api:8080}
       VAULT_OSADM_SSH_KV_PATH: ${VAULT_OSADM_SSH_KV_PATH:-infra/data/ssh/osadm}
       PACKER_HTTP_IP: ${PACKER_HTTP_IP:-}
       # Windows post-deploy hook (requirements/windows-server.md §1d): domain
@@ -157,6 +164,7 @@ services:
       - deployer_repo:/terraform/repo
       - packer_repo:/packer
       - docs_repo:/docsrepo
+      - ansible_repo:/ansible
       - ${DLPLAB_CA_DIR:-/data/compose/cacerts}:/etc/ssl/cacerts:ro
 
   scheduler:
@@ -376,3 +384,4 @@ volumes:
   deployer_repo:  # terraform template/modules git repo checkout
   packer_repo:    # bubbletea-packer git repo checkout (image builds)
   docs_repo:      # app-bubbletea-documentation checkout (docs git sync)
+  ansible_repo:   # app-bubbletea-ansible checkout (application deployment)
